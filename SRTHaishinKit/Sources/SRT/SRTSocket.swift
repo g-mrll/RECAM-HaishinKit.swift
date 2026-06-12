@@ -149,7 +149,7 @@ final actor SRTSocket {
                 }
                 var remoteaddr = remote.makeSockaddr()
                 var localaddr = local.makeSockaddr()
-                return srt_rendezvous(socket, &remoteaddr, Int32(remote.size), &localaddr, Int32(local.size))
+                return srt_rendezvous(socket, &localaddr, Int32(local.size), &remoteaddr, Int32(remote.size))
             }
         }()
         guard status != SRT_ERROR else {
