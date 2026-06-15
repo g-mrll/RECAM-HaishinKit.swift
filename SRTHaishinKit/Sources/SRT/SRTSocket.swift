@@ -292,7 +292,11 @@ extension SRTSocket: NetworkTransportReporter {
         return .init(
             queueBytesOut: Int(performanceData.byteSndBuf),
             totalBytesIn: Int(performanceData.byteRecvTotal),
-            totalBytesOut: Int(performanceData.byteSentTotal)
+            totalBytesOut: Int(performanceData.byteSentTotal),
+            roundTripTimeMs: performanceData.msRTT,
+            packetsSent: Int(performanceData.pktSent),
+            packetsRetransmitted: Int(performanceData.pktRetrans),
+            packetsSendDropped: Int(performanceData.pktSndDrop)
         )
     }
 

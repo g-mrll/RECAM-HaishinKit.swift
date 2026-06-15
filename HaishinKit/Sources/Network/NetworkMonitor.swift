@@ -56,7 +56,11 @@ package final actor NetworkMonitor {
             totalBytesOut: totalBytesOut,
             currentQueueBytesOut: queueBytesOut,
             currentBytesInPerSecond: currentBytesInPerSecond,
-            currentBytesOutPerSecond: currentBytesOutPerSecond
+            currentBytesOutPerSecond: currentBytesOutPerSecond,
+            roundTripTimeMs: report.roundTripTimeMs,
+            packetsSent: report.packetsSent,
+            packetsRetransmitted: report.packetsRetransmitted,
+            packetsSendDropped: report.packetsSendDropped
         )
         if measureInterval <= previousQueueBytesOut.count {
             defer {

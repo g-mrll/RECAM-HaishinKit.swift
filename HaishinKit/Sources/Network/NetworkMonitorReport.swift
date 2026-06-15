@@ -12,4 +12,12 @@ public struct NetworkMonitorReport: Sendable {
     public let currentBytesInPerSecond: Int
     /// The statistics of outgoing bytes per second.
     public let currentBytesOutPerSecond: Int
+    /// Round-trip time in ms (SRT end-to-end; 0 if unavailable).
+    public let roundTripTimeMs: Double
+    /// Packets sent this interval (SRT).
+    public let packetsSent: Int
+    /// Packets retransmitted this interval (SRT).
+    public let packetsRetransmitted: Int
+    /// Packets dropped on send this interval — SRT TLPKTDROP.
+    public let packetsSendDropped: Int
 }
