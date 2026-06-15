@@ -20,7 +20,9 @@ public final actor AudioPlayer {
             return
         }
         if let format {
-            audioEngine.connect(avPlayerNode, to: audioEngine.outputNode, format: format)
+            // Route through mainMixerNode (not outputNode) so the mixer handles
+            // channel conversion for a mono source → stereo hardware.
+            audioEngine.connect(avPlayerNode, to: audioEngine.mainMixerNode, format: format)
             if !audioEngine.isRunning {
                 try? audioEngine.start()
             }

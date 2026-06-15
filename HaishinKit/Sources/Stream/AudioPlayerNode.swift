@@ -57,7 +57,10 @@ final actor AudioPlayerNode {
         }
         Task {
             audioTime.advanced(Int64(audioBuffer.frameLength))
-            await playerNode.scheduleBuffer(audioBuffer, at: audioTime.at)
+            // Sequential scheduling: the `audioTime.at` anchor is captured from
+            // playerNode.lastRenderTime before play() starts (nil → hostTime 0,
+            // rate 0) → bogus schedule times. `at: nil` queues buffers back-to-back.
+            await playerNode.scheduleBuffer(audioBuffer, at: nil)
             scheduledAudioBuffers -= 1
             if scheduledAudioBuffers == 0 {
                 isBuffering = true
