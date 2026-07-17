@@ -129,11 +129,12 @@ public actor SRTConnection: NetworkConnection {
         }
     }
 
-    /// Closes a connection.
+    /// Closes a connection. Idempotent and unconditional: it tears down the socket, listener,
+    /// and network monitor even when `uri` is nil — i.e. when a connect hasn't COMPLETED yet
+    /// (a listener blocked in `accept()` awaiting a peer, or a rendezvous mid-dial). The old
+    /// `guard uri != nil` bailed out in exactly those states, leaking the bound socket/listener
+    /// across an SRT mode switch (rendezvous <-> listener) so nothing was "restarted from 0".
     public func close() async {
-        guard uri != nil else {
-            return
-        }
         await networkMonitor?.stopRunning()
         networkMonitor = nil
         for stream in streams {
