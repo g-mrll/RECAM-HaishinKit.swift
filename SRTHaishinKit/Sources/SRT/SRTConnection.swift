@@ -35,15 +35,25 @@ public actor SRTConnection: NetworkConnection {
     private var listener: SRTSocket?
     private var networkMonitor: NetworkMonitor?
 
+    /// Process-singleton SRT library init. libsrt refcounts srt_startup/srt_cleanup, so the old
+    /// per-instance pairing (startup in init, cleanup in deinit) hit ZERO whenever no SRTConnection
+    /// was momentarily alive — a stream stop, a mode bounce, the gap between teardown and the next
+    /// session. srt_cleanup then closed ALL sockets and stopped SRT's GC thread, and the in-process
+    /// re-init left `srt_create_socket` failing ("Operation not supported: Invalid socket ID") on
+    /// every subsequent dial until an app relaunch. Initialize once, never cleanup (the OS reclaims
+    /// everything at process death) — the standard production SRT lifecycle.
+    private static let srtStartup: Void = {
+        srt_startup()
+    }()
+
     /// Creates an object.
     public init() {
-        srt_startup()
+        _ = Self.srtStartup
         socket = SRTSocket()
     }
 
     deinit {
         streams.removeAll()
-        srt_cleanup()
     }
 
     /// Gets a SRTSocketOption.
