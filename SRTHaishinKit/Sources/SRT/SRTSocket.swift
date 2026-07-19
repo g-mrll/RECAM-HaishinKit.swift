@@ -154,6 +154,10 @@ final actor SRTSocket {
         }()
         guard status != SRT_ERROR else {
             let reason = SRTRejectReason(socket: socket) ?? .unknown
+            // A failed dial must not leak its (possibly already-bound) socket — see stopRunning.
+            // Read the reject reason BEFORE closing; srt_close invalidates it.
+            srt_close(socket)
+            socket = SRT_INVALID_SOCK
             throw Error.rejected(reason)
         }
         switch url.mode {
@@ -274,7 +278,13 @@ extension SRTSocket: AsyncRunner {
     }
 
     func stopRunning() async {
-        guard isRunning else {
+        // Close unconditionally (guard only against double-close): `isRunning` is set only AFTER a
+        // successful connect, so guarding on it left every mid-dial or failed-dial socket — which
+        // srt_bind may have ALREADY BOUND to a local port (rendezvous binds 0.0.0.0:<port> before
+        // connecting) — open forever. The leaked bound socket then makes every re-dial of the same
+        // port fail instantly (EADDRINUSE / poisoned muxer): the "route switch needs an app kill"
+        // 2 s insta-fail loop. Sibling of the SRTConnection.close() `uri != nil` guard removal.
+        guard socket != SRT_INVALID_SOCK else {
             return
         }
         srt_close(socket)

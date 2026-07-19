@@ -99,6 +99,9 @@ public actor SRTConnection: NetworkConnection {
                         connected = await socket?.status == .connected
                         continuation.resume()
                     } catch {
+                        // Close the failed socket before replacing it — a bound-but-failed dial
+                        // otherwise holds its local port forever (see SRTSocket.stopRunning).
+                        await socket?.stopRunning()
                         socket = SRTSocket()
                         continuation.resume(throwing: error)
                     }
@@ -122,10 +125,11 @@ public actor SRTConnection: NetworkConnection {
             case .rejected(let reason):
                 throw Error.failedToConnect(reason)
             default:
-                throw Error.invalidState
+                // Rethrow as-is: `.illegalState(message)` carries the actual srt error string
+                // (bind failure, unreachable, …) — flattening it to `.invalidState` left route
+                // failures undiagnosable from the app's logs.
+                throw error
             }
-        } catch {
-            throw Error.invalidState
         }
     }
 
