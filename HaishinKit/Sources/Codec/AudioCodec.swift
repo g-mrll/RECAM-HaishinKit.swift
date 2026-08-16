@@ -60,19 +60,22 @@ final class AudioCodec {
             var offset = 0
             var presentationTimeStamp = sampleBuffer.presentationTimeStamp
             for i in 0..<sampleBuffer.numSamples {
-                guard let buffer = makeInputBuffer() as? AVAudioCompressedBuffer else {
+                let sampleSize = CMSampleBufferGetSampleSize(sampleBuffer, at: i)
+                defer {
+                    presentationTimeStamp = CMTimeAdd(presentationTimeStamp, CMTime(value: CMTimeValue(1024), timescale: sampleBuffer.presentationTimeStamp.timescale))
+                    offset += sampleSize
+                }
+                let byteCount = sampleSize - ADTSHeader.size
+                guard let buffer = makeInputBuffer() as? AVAudioCompressedBuffer,
+                      0 < byteCount, byteCount <= Int(buffer.byteCapacity) else {
                     continue
                 }
-                let sampleSize = CMSampleBufferGetSampleSize(sampleBuffer, at: i)
-                let byteCount = sampleSize - ADTSHeader.size
                 buffer.packetDescriptions?.pointee = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: 0, mDataByteSize: UInt32(byteCount))
                 buffer.packetCount = 1
                 buffer.byteLength = UInt32(byteCount)
                 if let blockBuffer = sampleBuffer.dataBuffer {
                     CMBlockBufferCopyDataBytes(blockBuffer, atOffset: offset + ADTSHeader.size, dataLength: byteCount, destination: buffer.data)
                     append(buffer, when: presentationTimeStamp.makeAudioTime())
-                    presentationTimeStamp = CMTimeAdd(presentationTimeStamp, CMTime(value: CMTimeValue(1024), timescale: sampleBuffer.presentationTimeStamp.timescale))
-                    offset += sampleSize
                 }
             }
         default:
@@ -144,7 +147,8 @@ final class AudioCodec {
             buffer?.frameLength = Self.defaultFrameCapacity
             return buffer
         default:
-            return AVAudioCompressedBuffer(format: inputFormat, packetCapacity: 1, maximumPacketSize: 1024)
+            // The ADTS frame length field is 13 bits, so one frame can carry up to 8191 bytes.
+            return AVAudioCompressedBuffer(format: inputFormat, packetCapacity: 1, maximumPacketSize: 8192)
         }
     }
 
