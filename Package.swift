@@ -36,8 +36,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "libsrt",
-            url: "https://github.com/HaishinKit/libsrt-xcframework/releases/download/v1.5.4/libsrt.xcframework.zip",
-            checksum: "76879e2802e45ce043f52871a0a6764d57f833bdb729f2ba6663f4e31d658c4a"
+            url: "https://github.com/g-mrll/RECAM-HaishinKit.swift/releases/download/libsrt-1.5.4-recam1/libsrt.xcframework.zip",
+            checksum: "1d15bf5e77f7d531cfff37a150cdd7ae404c0412b399a5dcb7fb4ac61623c498"
         ),
         .binaryTarget(
             name: "libdatachannel",
