@@ -129,12 +129,14 @@ final actor SRTSocket {
             switch url.mode {
             case .caller:
                 guard let remote = url.remote else {
+                    logger.error("caller: cannot resolve remote host \(url.url.host ?? "")")
                     return SRT_ERROR
                 }
                 logger.info("caller -> \(remote)")
                 return remote.withSockaddr { srt_connect(socket, $0, $1) }
             case .listener:
                 guard let local = url.local() else {
+                    logger.error("listener: cannot resolve the adapter address")
                     return SRT_ERROR
                 }
                 logger.info("listener on \(local)")
@@ -144,7 +146,12 @@ final actor SRTSocket {
                 }
                 return srt_listen(socket, 1)
             case .rendezvous:
-                guard let remote = url.remote, let local = url.local(family: remote.family) else {
+                guard let remote = url.remote else {
+                    logger.error("rendezvous: cannot resolve remote host \(url.url.host ?? "")")
+                    return SRT_ERROR
+                }
+                guard let local = url.local(family: remote.family) else {
+                    logger.error("rendezvous: adapter does not resolve to the remote's family (\(remote))")
                     return SRT_ERROR
                 }
                 logger.info("rendezvous \(local) -> \(remote)")
@@ -222,6 +229,7 @@ final actor SRTSocket {
     }
 
     /// libsrt refuses to bind `::` until SRTO_IPV6ONLY is set: use the URL's `ipv6only`, else 1.
+    /// A listener with `adapter=::&ipv6only=0` accepts both families.
     private func prepareBind(_ local: SRTSocketAddress, options: [SRTSocketOption]) -> Bool {
         guard local.family == AF_INET6, local.isWildcard else {
             return true

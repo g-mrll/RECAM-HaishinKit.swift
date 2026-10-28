@@ -74,7 +74,7 @@ import libsrt
             let url = SRTSocketURL(URL(string: "srt://:9000?adapter=0.0.0.0")) else {
             return
         }
-        #expect(url.local != nil)
+        #expect(url.local() != nil)
         #expect(url.mode == SRTMode.rendezvous)
     }
 

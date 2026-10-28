@@ -14,6 +14,10 @@ struct SRTSocketAddress {
         guard UInt16(exactly: port) != nil else {
             return []
         }
+        // IPv6 literals need no synthesis, and AI_ADDRCONFIG would drop them on a host without IPv6.
+        if let literal = SRTSocketAddress(literal: host, port: port), literal.family == AF_INET6 {
+            return [literal]
+        }
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = SOCK_DGRAM

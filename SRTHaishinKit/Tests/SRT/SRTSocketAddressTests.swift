@@ -38,6 +38,7 @@ import libsrt
     @Test func resolve() {
         #expect(SRTSocketAddress.resolve(host: "127.0.0.1", port: 9000).map(\.description) == ["127.0.0.1:9000"])
         #expect(SRTSocketAddress.resolve(host: "::1", port: 9000).map(\.description) == ["[::1]:9000"])
+        #expect(SRTSocketAddress.resolve(host: "2001:db8::1", port: 9000).map(\.description) == ["[2001:db8::1]:9000"])
         #expect(SRTSocketAddress.resolve(host: "host.invalid", port: 9000).isEmpty)
         #expect(SRTSocketAddress.resolve(host: "127.0.0.1", port: -1).isEmpty)
     }
@@ -73,7 +74,8 @@ import libsrt
 }
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct SRTSocketDualStackLoopbackTests {
-    private static let options = "passphrase=0123456789abcdef&transtype=live&latency=120"
+    // A finite rcvtimeo keeps a receiver blocked in srt_recvmsg from stalling teardown.
+    private static let options = "passphrase=0123456789abcdef&transtype=live&latency=120&rcvtimeo=1000"
 
     init() {
         srt_startup()
@@ -97,9 +99,10 @@ import libsrt
     func callerToListener(host: String, port: Int) async throws {
         let adapter = host.hasPrefix("[") ? "::" : "0.0.0.0"
         let listener = SRTSocket()
-        try await listener.open(#require(SRTSocketURL(URL(string: "srt://:\(port)?mode=listener&adapter=\(adapter)&\(Self.options)"))))
+        let listenerURL = try #require(SRTSocketURL(URL(string: "srt://:\(port)?mode=listener&adapter=\(adapter)&\(Self.options)")))
+        try await listener.open(listenerURL)
         let caller = SRTSocket()
-        async let accepted = listener.accept([])
+        async let accepted = listener.accept(listenerURL.options)
         try await caller.open(#require(SRTSocketURL(URL(string: "srt://\(host):\(port)?mode=caller&\(Self.options)"))))
         let server = try await accepted
         #expect(await Self.exchange(from: caller, to: server))
