@@ -128,28 +128,32 @@ final actor SRTSocket {
         let status: Int32 = try {
             switch url.mode {
             case .caller:
-                guard var remote = url.remote else {
+                guard let remote = url.remote else {
                     return SRT_ERROR
                 }
-                var remoteaddr = remote.makeSockaddr()
-                return srt_connect(socket, &remoteaddr, Int32(remote.size))
+                logger.info("caller -> \(remote)")
+                return remote.withSockaddr { srt_connect(socket, $0, $1) }
             case .listener:
-                guard var local = url.local else {
+                guard let local = url.local() else {
                     return SRT_ERROR
                 }
-                var localaddr = local.makeSockaddr()
-                let status = srt_bind(socket, &localaddr, Int32(local.size))
-                guard status != SRT_ERROR else {
+                logger.info("listener on \(local)")
+                guard prepareBind(local, options: url.options),
+                      local.withSockaddr({ srt_bind(socket, $0, $1) }) != SRT_ERROR else {
                     throw makeSocketError()
                 }
                 return srt_listen(socket, 1)
             case .rendezvous:
-                guard var remote = url.remote, var local = url.local else {
+                guard let remote = url.remote, let local = url.local(family: remote.family) else {
                     return SRT_ERROR
                 }
-                var remoteaddr = remote.makeSockaddr()
-                var localaddr = local.makeSockaddr()
-                return srt_rendezvous(socket, &localaddr, Int32(local.size), &remoteaddr, Int32(remote.size))
+                logger.info("rendezvous \(local) -> \(remote)")
+                guard prepareBind(local, options: url.options) else {
+                    throw makeSocketError()
+                }
+                return local.withSockaddr { localaddr, locallen in
+                    remote.withSockaddr { srt_rendezvous(socket, localaddr, locallen, $0, $1) }
+                }
             }
         }()
         guard status != SRT_ERROR else {
@@ -217,6 +221,22 @@ final actor SRTSocket {
         return true
     }
 
+    /// libsrt refuses to bind `::` until SRTO_IPV6ONLY is set: use the URL's `ipv6only`, else 1.
+    private func prepareBind(_ local: SRTSocketAddress, options: [SRTSocketOption]) -> Bool {
+        guard local.family == AF_INET6, local.isWildcard else {
+            return true
+        }
+        do {
+            let option = try options.first { $0.name.rawValue == SRTSocketOption.Name.ipv6only.rawValue }
+                ?? SRTSocketOption(name: .ipv6only, value: 1)
+            try option.setSockflag(socket)
+            return true
+        } catch {
+            logger.error(error)
+            return false
+        }
+    }
+
     private func bstats() -> Int32 {
         guard socket != SRT_INVALID_SOCK else {
             return SRT_ERROR
@@ -280,7 +300,7 @@ extension SRTSocket: AsyncRunner {
     func stopRunning() async {
         // Close unconditionally (guard only against double-close): `isRunning` is set only AFTER a
         // successful connect, so guarding on it left every mid-dial or failed-dial socket — which
-        // srt_bind may have ALREADY BOUND to a local port (rendezvous binds 0.0.0.0:<port> before
+        // srt_bind may have ALREADY BOUND to a local port (rendezvous binds 0.0.0.0/:: :<port> before
         // connecting) — open forever. The leaked bound socket then makes every re-dial of the same
         // port fail instantly (EADDRINUSE / poisoned muxer): the "route switch needs an app kill"
         // 2 s insta-fail loop. Sibling of the SRTConnection.close() `uri != nil` guard removal.

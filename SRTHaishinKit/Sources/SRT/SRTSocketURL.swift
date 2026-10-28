@@ -27,20 +27,34 @@ struct SRTSocketURL {
     let mode: SRTMode
     let options: [SRTSocketOption]
 
-    var remote: sockaddr_in? {
+    /// The peer address, resolved now (blocking): the first IPv4 result, else the first result.
+    var remote: SRTSocketAddress? {
         guard let host = url.host else {
             return nil
         }
-        return .init(host, port: url.port ?? Self.defaultPort)
+        return .preferred(SRTSocketAddress.resolve(host: host, port: url.port ?? Self.defaultPort))
     }
 
-    var local: sockaddr_in? {
+    /// The bind address from the `adapter` (default `0.0.0.0`) and `port` query items.
+    ///
+    /// - Parameter family: the remote's family, which libsrt requires the bind to match.
+    ///   A wildcard adapter follows it (`0.0.0.0` becomes `::`); any other adapter must match it.
+    func local(family: Int32? = nil) -> SRTSocketAddress? {
         let queryItems = Self.getQueryItems(url)
+        let port = queryItems["port"].flatMap { Int($0) } ?? url.port ?? Self.defaultPort
         let adapter = queryItems["adapter"] ?? "0.0.0.0"
-        if let port = queryItems["port"] {
-            return .init(adapter, port: Int(port) ?? url.port ?? Self.defaultPort)
+        let candidates = SRTSocketAddress(literal: adapter, port: port).map { [$0] }
+            ?? SRTSocketAddress.resolve(host: adapter, port: port, flags: AI_PASSIVE)
+        guard let family else {
+            return .preferred(candidates)
         }
-        return .init(adapter, port: url.port ?? Self.defaultPort)
+        if let match = candidates.first(where: { $0.family == family }) {
+            return match
+        }
+        if candidates.contains(where: \.isWildcard) {
+            return .wildcard(family: family, port: port)
+        }
+        return nil
     }
 
     init?(_ url: URL?) {
