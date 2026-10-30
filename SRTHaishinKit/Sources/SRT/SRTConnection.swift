@@ -34,6 +34,7 @@ public actor SRTConnection: NetworkConnection {
     private var streams: [SRTStream] = []
     private var listener: SRTSocket?
     private var networkMonitor: NetworkMonitor?
+    private var isClosing = false
 
     /// Process-singleton SRT library init. libsrt refcounts srt_startup/srt_cleanup, so the old
     /// per-instance pairing (startup in init, cleanup in deinit) hit ZERO whenever no SRTConnection
@@ -149,6 +150,8 @@ public actor SRTConnection: NetworkConnection {
     /// `guard uri != nil` bailed out in exactly those states, leaking the bound socket/listener
     /// across an SRT mode switch (rendezvous <-> listener) so nothing was "restarted from 0".
     public func close() async {
+        isClosing = true
+        defer { isClosing = false }
         await networkMonitor?.stopRunning()
         networkMonitor = nil
         for stream in streams {
@@ -178,6 +181,10 @@ public actor SRTConnection: NetworkConnection {
             }
             for await data in await socket.inputs {
                 await streams.first?.doInput(data)
+            }
+            // Ended by an explicit close(): a second, interleaved one would drop its fresh socket unclosed.
+            guard !isClosing, self.socket === socket else {
+                return
             }
             await close()
         }

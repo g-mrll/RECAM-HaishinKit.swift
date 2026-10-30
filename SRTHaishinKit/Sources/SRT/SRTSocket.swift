@@ -57,20 +57,19 @@ final actor SRTSocket {
         }
     }
 
+    /// Received payloads. The blocking `srt_recvmsg` runs on its own thread, off this actor, so
+    /// `stopRunning()` is never queued behind it: its `srt_close` wakes the read at once.
     var inputs: AsyncStream<Data> {
-        AsyncStream<Data> { continuation in
-            // If Task.detached is not used, closing will result in a deadlock.
-            Task.detached {
-                while await self.connected {
-                    let result = await self.recvmsg()
-                    if 0 <= result {
-                        continuation.yield(await self.incomingBuffer.subdata(in: 0..<Data.Index(result)))
-                    } else {
-                        await self.stopRunning()
-                        continuation.finish()
-                    }
-                }
+        let socket = self.socket
+        let capacity = windowSizeC
+        return AsyncStream<Data> { continuation in
+            let thread = Thread {
+                Self.receiveLoop(socket, capacity: capacity, into: continuation)
+                Task { await self.stopRunning() }
             }
+            thread.name = "SRTSocket.recv"
+            thread.qualityOfService = .userInitiated
+            thread.start()
         }
     }
 
@@ -94,7 +93,6 @@ final actor SRTSocket {
         status == .connected
     }
     private var windowSizeC: Int32 = 1024 * 4
-    private lazy var incomingBuffer: Data = .init(count: Int(windowSizeC))
 
     init() {
         socket = srt_create_socket()
@@ -104,9 +102,6 @@ final actor SRTSocket {
         self.socket = socket
         guard configure(options, restriction: .post) else {
             throw makeSocketError()
-        }
-        if incomingBuffer.count < windowSizeC {
-            incomingBuffer = .init(count: Int(windowSizeC))
         }
     }
 
@@ -177,9 +172,6 @@ final actor SRTSocket {
         default:
             guard configure(url.options, restriction: .post) else {
                 throw makeSocketError()
-            }
-            if incomingBuffer.count < windowSizeC {
-                incomingBuffer = .init(count: Int(windowSizeC))
             }
         }
         await startRunning()
@@ -265,7 +257,7 @@ final actor SRTSocket {
     }
 
     @inline(__always)
-    private func sendmsg(_ data: Data) -> Int32 {
+    private static func sendmsg(_ socket: SRTSOCKET, _ data: Data) -> Int32 {
         return data.withUnsafeBytes { pointer in
             guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
                 return SRT_ERROR
@@ -274,14 +266,25 @@ final actor SRTSocket {
         }
     }
 
-    @inline(__always)
-    private func recvmsg() -> Int32 {
-        return incomingBuffer.withUnsafeMutableBytes { pointer in
-            guard let buffer = pointer.baseAddress?.assumingMemoryBound(to: CChar.self) else {
-                return SRT_ERROR
+    /// Reads until `srt_recvmsg` fails: a broken link, or `srt_close` from another thread.
+    private static func receiveLoop(
+        _ socket: SRTSOCKET,
+        capacity: Int32,
+        into continuation: AsyncStream<Data>.Continuation
+    ) {
+        var buffer = [CChar](repeating: 0, count: Int(capacity))
+        while true {
+            let result = buffer.withUnsafeMutableBufferPointer { srt_recvmsg(socket, $0.baseAddress, capacity) }
+            guard 0 <= result else {
+                // A finite `rcvtimeo` expiring is an idle link, not a broken one.
+                if srt_getlasterror(nil) == Int32(SRT_ETIMEOUT.rawValue) {
+                    continue
+                }
+                break
             }
-            return srt_recvmsg(socket, buffer, windowSizeC)
+            continuation.yield(buffer.withUnsafeBytes { Data($0.prefix(Int(result))) })
         }
+        continuation.finish()
     }
 }
 
@@ -294,11 +297,13 @@ extension SRTSocket: AsyncRunner {
         let stream = AsyncStream<Data> { continuation in
             self.outputs = continuation
         }
-        Task {
+        // Off the actor, like the receive loop: a blocked `srt_sendmsg` must not hold back `srt_close`.
+        let socket = self.socket
+        Task.detached(priority: Task.currentPriority) {
             for await data in stream {
-                let result = sendmsg(data)
-                if result == -1 {
-                    await stopRunning()
+                if Self.sendmsg(socket, data) == SRT_ERROR {
+                    await self.stopRunning()
+                    break
                 }
             }
         }

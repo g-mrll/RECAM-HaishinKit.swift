@@ -74,7 +74,7 @@ import libsrt
 }
 
 @Suite(.serialized, .timeLimit(.minutes(1))) struct SRTSocketDualStackLoopbackTests {
-    // A finite rcvtimeo keeps a receiver blocked in srt_recvmsg from stalling teardown.
+    // A finite rcvtimeo exercises the receive loop's idle path; stopRunning ends it either way.
     private static let options = "passphrase=0123456789abcdef&transtype=live&latency=120&rcvtimeo=1000"
 
     init() {
@@ -109,6 +109,27 @@ import libsrt
         await caller.stopRunning()
         await server.stopRunning()
         await listener.stopRunning()
+    }
+
+    /// An idle but live link (the peer still sends keepalives) must not hold back the close.
+    @Test func stopRunningInterruptsAnIdleReceive() async throws {
+        let options = "passphrase=0123456789abcdef&transtype=live&latency=120"
+        let left = SRTSocket()
+        let right = SRTSocket()
+        let leftURL = try #require(SRTSocketURL(URL(string: "srt://127.0.0.1:47151?mode=rendezvous&port=47150&\(options)")))
+        let rightURL = try #require(SRTSocketURL(URL(string: "srt://127.0.0.1:47150?mode=rendezvous&port=47151&\(options)")))
+        async let leftOpen: Void = left.open(leftURL)
+        async let rightOpen: Void = right.open(rightURL)
+        _ = try await (leftOpen, rightOpen)
+        let receiving = Task {
+            for await _ in await right.inputs {}
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let startedAt = Date()
+        await right.stopRunning()
+        await receiving.value
+        #expect(Date().timeIntervalSince(startedAt) < 1)
+        await left.stopRunning()
     }
 
     /// Sends until the receiver yields one payload, or 5 s pass.
