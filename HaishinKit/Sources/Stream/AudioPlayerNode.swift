@@ -5,7 +5,7 @@ final actor AudioPlayerNode {
     static let bufferCounts: Int = 10
 
     var currentTime: TimeInterval {
-        if playerNode.isPlaying {
+        if !isDetached && playerNode.isPlaying {
             guard
                 let nodeTime = playerNode.lastRenderTime,
                 let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
@@ -22,6 +22,7 @@ final actor AudioPlayerNode {
     private var audioTime = AudioTime()
     private var scheduledAudioBuffers: Int = 0
     private var isBuffering = true
+    private var isDetached = false
     private weak var player: AudioPlayer?
     private var format: AVAudioFormat? {
         didSet {
@@ -44,8 +45,15 @@ final actor AudioPlayerNode {
     }
 
     func enqueue(_ audioBuffer: AVAudioBuffer, when: AVAudioTime) async {
+        guard !isDetached else {
+            return
+        }
         format = audioBuffer.format
         guard let audioBuffer = audioBuffer as? AVAudioPCMBuffer, await player?.isConnected(self) == true else {
+            return
+        }
+        // detach() may have run during the hop above: never touch a detached node.
+        guard !isDetached, playerNode.engine != nil else {
             return
         }
         if !audioTime.hasAnchor {
@@ -57,6 +65,10 @@ final actor AudioPlayerNode {
         }
         Task {
             audioTime.advanced(Int64(audioBuffer.frameLength))
+            guard !isDetached else {
+                scheduledAudioBuffers -= 1
+                return
+            }
             // Sequential scheduling: the `audioTime.at` anchor is captured from
             // playerNode.lastRenderTime before play() starts (nil → hostTime 0,
             // rate 0) → bogus schedule times. `at: nil` queues buffers back-to-back.
@@ -69,6 +81,7 @@ final actor AudioPlayerNode {
     }
 
     func detach() async {
+        isDetached = true
         stopRunning()
         await player?.detach(self)
     }

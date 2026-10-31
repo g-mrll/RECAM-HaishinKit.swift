@@ -41,6 +41,7 @@ public final actor AudioPlayer {
             audioEngine?.detach(playerNode)
         }
         playerNodes[playerNode] = nil
+        connected[playerNode] = nil
     }
 
     func makePlayerNode() -> AudioPlayerNode {
